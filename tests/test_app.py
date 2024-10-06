@@ -1,8 +1,14 @@
+import os
 import unittest
 import json
 from unittest.mock import patch
 from app import app
 import requests
+import spotipy
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 class TestMusicRecommendationAPI(unittest.TestCase):
     def setUp(self):
@@ -151,6 +157,115 @@ class TestMusicRecommendationAPI(unittest.TestCase):
         # Check if the response status code is 500 (Internal Server Error)
         self.assertEqual(response.status_code, 500)
         self.assertIn("API request failed", json.loads(response.data)["error"])
+    @patch('app.spotify')
+    def test_playlist_genres(self, mock_spotify):
+        # Mock Spotify API responses
+        mock_spotify.playlist_tracks.return_value = {
+            'items': [
+                {'track': {'artists': [{'id': 'artist1'}, {'id': 'artist2'}]}},
+                {'track': {'artists': [{'id': 'artist3'}]}},
+            ],
+            'next': None
+        }
+        mock_spotify.artists.return_value = {
+            'artists': [
+                {'id': 'artist1', 'genres': ['pop', 'rock']},
+                {'id': 'artist2', 'genres': ['rock', 'alternative']},
+                {'id': 'artist3', 'genres': ['hip-hop', 'rap']},
+            ]
+        }
+
+        # Test data
+        test_data = {
+            "playlist_url": "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"
+        }
+
+        # Send POST request to the /api/playlist-genres endpoint
+        response = self.app.post('/api/playlist-genres',
+                                 data=json.dumps(test_data),
+                                 content_type='application/json')
+
+        # Check if the response status code is 200 (OK)
+        self.assertEqual(response.status_code, 200)
+
+        # Check if the response data contains the expected information
+        response_data = json.loads(response.data)
+        self.assertIn('playlist_id', response_data)
+        self.assertIn('total_tracks', response_data)
+        self.assertIn('genres', response_data)
+        self.assertEqual(response_data['playlist_id'], '37i9dQZF1DXcBWIGoYBM5M')
+        self.assertEqual(response_data['total_tracks'], 2)
+        self.assertEqual(response_data['genres'], {'rock': 2, 'pop': 1, 'alternative': 1, 'hip-hop': 1, 'rap': 1})
+        
+        # Check if the number of genres is at most 10
+        self.assertLessEqual(len(response_data['genres']), 10)
+
+    def test_playlist_genres_missing_url(self):
+        # Test with missing playlist URL
+        invalid_data = {}
+        response = self.app.post('/api/playlist-genres',
+                                 data=json.dumps(invalid_data),
+                                 content_type='application/json')
+
+        # Check if the response status code is 400 (Bad Request)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("missing playlist_url", json.loads(response.data)["error"])
+
+    @patch('app.spotify')
+    def test_playlist_genres_spotify_error(self, mock_spotify):
+        # Mock a Spotify API error
+        mock_spotify.playlist_tracks.side_effect = spotipy.SpotifyException(400, -1, "Invalid playlist")
+
+        # Test data
+        test_data = {
+            "playlist_url": "https://open.spotify.com/playlist/invalid"
+        }
+
+        # Send POST request to the /api/playlist-genres endpoint
+        response = self.app.post('/api/playlist-genres',
+                                 data=json.dumps(test_data),
+                                 content_type='application/json')
+
+        # Check if the response status code is 500 (Internal Server Error)
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("Spotify API error", json.loads(response.data)["error"])
+
+    def test_playlist_genres_real_api(self):
+        # Ensure Spotify credentials are set
+        if not os.getenv('SPOTIFY_CLIENT_ID') or not os.getenv('SPOTIFY_CLIENT_SECRET'):
+            self.skipTest("Spotify credentials not set in .env file")
+
+        # Test data
+        test_data = {
+            "playlist_url": "https://open.spotify.com/playlist/37i9dQZF1DXdPec7aLTmlC"
+        }
+
+        # Send POST request to the /api/playlist-genres endpoint
+        response = self.app.post('/api/playlist-genres',
+                                 data=json.dumps(test_data),
+                                 content_type='application/json')
+
+        # Check if the response status code is 200 (OK)
+        self.assertEqual(response.status_code, 200)
+
+        # Check if the response data contains the expected information
+        response_data = json.loads(response.data)
+        self.assertIn('playlist_id', response_data)
+        self.assertIn('total_tracks', response_data)
+        self.assertIn('genres', response_data)
+        self.assertEqual(response_data['playlist_id'], '37i9dQZF1DXdPec7aLTmlC')
+        
+        # Check if the total_tracks is greater than 0
+        self.assertGreater(response_data['total_tracks'], 0)
+        
+        # Check if genres is not empty and has at most 10 genres
+        self.assertGreater(len(response_data['genres']), 0)
+        self.assertLessEqual(len(response_data['genres']), 10)
+        
+        # Print out the genres for manual verification
+        print("\nGenres found in the playlist:")
+        for genre, count in response_data['genres'].items():
+            print(f"{genre}: {count}")
 
 if __name__ == '__main__':
     unittest.main()

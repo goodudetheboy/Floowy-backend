@@ -1,9 +1,27 @@
+import os
+from typing import Counter
+from dotenv import load_dotenv
 from flask import Flask, request, jsonify
 import requests
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
+
+# Load environment variables
+load_dotenv()
 
 app = Flask(__name__)
 
 base_url = 'https://suno-api-1-ruby.vercel.app'
+
+# Spotify API credentials
+SPOTIFY_CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')
+SPOTIFY_CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET')
+
+# Initialize Spotify client
+spotify = spotipy.Spotify(client_credentials_manager=SpotifyClientCredentials(
+    client_id=SPOTIFY_CLIENT_ID,
+    client_secret=SPOTIFY_CLIENT_SECRET
+))
 
 def custom_generate_audio(payload):
     url = f"{base_url}/api/custom_generate"
@@ -104,5 +122,59 @@ def generate_song():
     except Exception as e:
         return jsonify({"error": f"An unexpected error occurred: {str(e)}"}), 500
 
+@app.route('/api/playlist-genres', methods=['POST'])
+def playlist_genres():
+    try:
+        data = request.json
+        
+        # Validate input
+        if 'playlist_url' not in data:
+            return jsonify({"error": "Invalid input: missing playlist_url"}), 400
+
+        playlist_url = data['playlist_url']
+        
+        # Extract playlist ID from URL
+        playlist_id = playlist_url.split('/')[-1].split('?')[0]
+
+        # Get playlist tracks
+        results = spotify.playlist_tracks(playlist_id)
+        tracks = results['items']
+
+        # Get more tracks if the playlist has more than 100 songs
+        while results['next']:
+            results = spotify.next(results)
+            tracks.extend(results['items'])
+
+        # Extract artist IDs
+        artist_ids = set()
+        for track in tracks:
+            for artist in track['track']['artists']:
+                artist_ids.add(artist['id'])
+
+        # Get genres for all artists
+        all_genres = []
+        for i in range(0, len(artist_ids), 50):
+            artists = spotify.artists(list(artist_ids)[i:i+50])
+            for artist in artists['artists']:
+                all_genres.extend(artist['genres'])
+
+        # Count genre occurrences
+        genre_counts = Counter(all_genres)
+
+        # Sort genres by count and get the top 10
+        top_10_genres = dict(sorted(genre_counts.items(), key=lambda x: x[1], reverse=True)[:10])
+
+        return jsonify({
+            "playlist_id": playlist_id,
+            "total_tracks": len(tracks),
+            "genres": top_10_genres
+        })
+
+    except spotipy.SpotifyException as e:
+        return jsonify({"error": f"Spotify API error: {str(e)}"}), 500
+    except KeyError as e:
+        return jsonify({"error": f"Invalid input: missing key {str(e)}"}), 400
+    except Exception as e:
+        return jsonify({"error": f"An unexpected error occurred: {str(e)}"}), 500
 if __name__ == '__main__':
     app.run(debug=True)
