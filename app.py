@@ -1,7 +1,10 @@
+import json
 import os
+import random
 from typing import Counter
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify
+import openai
 import requests
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
@@ -16,6 +19,13 @@ base_url = 'https://suno-api-1-ruby.vercel.app'
 # Spotify API credentials
 SPOTIFY_CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')
 SPOTIFY_CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET')
+
+# OpenAI API key
+
+client = openai.OpenAI(
+    # This is the default and can be omitted
+    api_key=os.environ.get("OPENAI_API_KEY"),
+)
 
 # Initialize Spotify client
 spotify = spotipy.Spotify(client_credentials_manager=SpotifyClientCredentials(
@@ -176,5 +186,113 @@ def playlist_genres():
         return jsonify({"error": f"Invalid input: missing key {str(e)}"}), 400
     except Exception as e:
         return jsonify({"error": f"An unexpected error occurred: {str(e)}"}), 500
+
+
+def get_song_lyrics(track_name, artist_name):
+    # This is a placeholder function. In a real-world scenario, you would use a lyrics API or web scraping to get the lyrics.
+    # For this example, we'll return a dummy lyrics string.
+    return f"This is a placeholder for the lyrics of {track_name} by {artist_name}."
+
+def analyze_lyrics(lyrics, mood, activity):
+    prompt = f"""
+    Analyze the following song lyrics in the context of the given mood and activity:
+
+    Lyrics: {lyrics}
+
+    Mood: {mood}
+    Activity: {activity}
+
+    Please provide your analysis in JSON format with the following structure:
+    {{
+        "mood_score": <int between 0 and 10>,
+        "relevance_score": <int between 0 and 10>,
+        "summary": "<brief summary of the lyrics, max 50 words>",
+        "mood_explanation": "<brief explanation of the mood score>",
+        "relevance_explanation": "<brief explanation of the relevance score>"
+    }}
+    """
+
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant that analyzes song lyrics and provides responses in JSON format."},
+            {"role": "user", "content": prompt}
+        ]
+    )
+
+    try:
+        analysis = json.loads(response.choices[0].message.content)
+        return analysis
+    except json.JSONDecodeError:
+        return {
+            "mood_score": 0,
+            "relevance_score": 0,
+            "summary": "Error parsing ChatGPT response",
+            "mood_explanation": "Error parsing ChatGPT response",
+            "relevance_explanation": "Error parsing ChatGPT response"
+        }
+
+@app.route('/api/analyze-songs', methods=['POST'])
+def analyze_songs():
+    try:
+        data = request.json
+        
+        # Validate input
+        required_fields = ['genres', 'mood', 'activity']
+        if not all(field in data for field in required_fields):
+            return jsonify({"error": "Invalid input: missing required fields"}), 400
+
+        genres = data['genres'][:5]  # Limit to top 5 genres
+        mood = data['mood']
+        activity = data['activity']
+
+        # Get tracks for each genre
+        all_tracks = []
+        for genre in genres:
+            results = spotify.search(q=f'genre:"{genre}"', type='track', limit=50)
+            all_tracks.extend(results['tracks']['items'])
+
+        # Shuffle and select 10 unique tracks
+        random.shuffle(all_tracks)
+        selected_tracks = []
+        seen_tracks = set()
+        for track in all_tracks:
+            track_id = track['id']
+            if track_id not in seen_tracks and len(selected_tracks) < 10:
+                selected_tracks.append(track)
+                seen_tracks.add(track_id)
+            if len(selected_tracks) == 10:
+                break
+
+        # Analyze each track
+        analyzed_tracks = []
+        for track in selected_tracks:
+            track_name = track['name']
+            artist_name = track['artists'][0]['name']
+            lyrics = get_song_lyrics(track_name, artist_name)
+            analysis = analyze_lyrics(lyrics, mood, activity)
+
+            analyzed_tracks.append({
+                "track_name": track_name,
+                "artist_name": artist_name,
+                "spotify_url": track['external_urls']['spotify'],
+                "mood_score": analysis['mood_score'],
+                "relevance_score": analysis['relevance_score'],
+                "summary": analysis['summary'],
+                "mood_explanation": analysis['mood_explanation'],
+                "relevance_explanation": analysis['relevance_explanation']
+            })
+
+        return jsonify(analyzed_tracks)
+
+    except spotipy.SpotifyException as e:
+        return jsonify({"error": f"Spotify API error: {str(e)}"}), 500
+    except openai.error.OpenAIError as e:
+        return jsonify({"error": f"OpenAI API error: {str(e)}"}), 500
+    except KeyError as e:
+        return jsonify({"error": f"Invalid input: missing key {str(e)}"}), 400
+    except Exception as e:
+        return jsonify({"error": f"An unexpected error occurred: {str(e)}"}), 500
+
 if __name__ == '__main__':
     app.run(debug=True)

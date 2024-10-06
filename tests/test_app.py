@@ -1,7 +1,7 @@
 import os
 import unittest
 import json
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from app import app
 import requests
 import spotipy
@@ -266,6 +266,158 @@ class TestMusicRecommendationAPI(unittest.TestCase):
         print("\nGenres found in the playlist:")
         for genre, count in response_data['genres'].items():
             print(f"{genre}: {count}")
+
+    @patch('app.spotify')
+    @patch('app.get_song_lyrics')
+    @patch('app.openai.ChatCompletion.create')
+    def test_analyze_songs(self, mock_openai, mock_get_lyrics, mock_spotify):
+        # Mock Spotify API response
+        mock_spotify.search.return_value = {
+            'tracks': {
+                'items': [
+                    {
+                        'id': 'track1',
+                        'name': 'Song 1',
+                        'artists': [{'name': 'Artist 1'}],
+                        'external_urls': {'spotify': 'https://open.spotify.com/track/1'}
+                    },
+                    {
+                        'id': 'track2',
+                        'name': 'Song 2',
+                        'artists': [{'name': 'Artist 2'}],
+                        'external_urls': {'spotify': 'https://open.spotify.com/track/2'}
+                    }
+                ]
+            }
+        }
+
+        # Mock lyrics retrieval
+        mock_get_lyrics.return_value = "Mock lyrics"
+
+        # Mock OpenAI API response
+        mock_openai.return_value = MagicMock(
+            choices=[MagicMock(message={'content': json.dumps({
+                'mood_score': 8,
+                'relevance_score': 7,
+                'summary': 'This is a mock summary.',
+                'mood_explanation': 'This is a mock mood explanation.',
+                'relevance_explanation': 'This is a mock relevance explanation.'
+            })})]
+        )
+
+        # Test data
+        test_data = {
+            "genres": ["pop", "rock"],
+            "mood": "happy",
+            "activity": "running"
+        }
+
+        # Send POST request to the /api/analyze-songs endpoint
+        response = self.app.post('/api/analyze-songs',
+                                 data=json.dumps(test_data),
+                                 content_type='application/json')
+
+        # Check if the response status code is 200 (OK)
+        self.assertEqual(response.status_code, 200)
+
+        # Check if the response data contains the expected information
+        response_data = json.loads(response.data)
+        self.assertEqual(len(response_data), 2)  # We expect 2 tracks in this test case
+        for track in response_data:
+            self.assertIn('track_name', track)
+            self.assertIn('artist_name', track)
+            self.assertIn('spotify_url', track)
+            self.assertIn('mood_score', track)
+            self.assertIn('relevance_score', track)
+            self.assertIn('summary', track)
+            self.assertIn('mood_explanation', track)
+            self.assertIn('relevance_explanation', track)
+
+    def test_analyze_songs_missing_fields(self):
+        # Test with missing fields
+        invalid_data = {"genres": ["pop"]}
+        response = self.app.post('/api/analyze-songs',
+                                 data=json.dumps(invalid_data),
+                                 content_type='application/json')
+
+        # Check if the response status code is 400 (Bad Request)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("missing required fields", json.loads(response.data)["error"])
+
+    @patch('app.spotify')
+    def test_analyze_songs_spotify_error(self, mock_spotify):
+        # Mock a Spotify API error
+        mock_spotify.search.side_effect = spotipy.SpotifyException(400, -1, "Invalid search")
+
+        # Test data
+        test_data = {
+            "genres": ["invalid_genre"],
+            "mood": "happy",
+            "activity": "running"
+        }
+
+        # Send POST request to the /api/analyze-songs endpoint
+        response = self.app.post('/api/analyze-songs',
+                                 data=json.dumps(test_data),
+                                 content_type='application/json')
+
+        # Check if the response status code is 500 (Internal Server Error)
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("Spotify API error", json.loads(response.data)["error"])
+
+    @unittest.skip("Only needed when debugging")
+    def test_analyze_songs_real(self):
+        # Test data
+        test_data = {
+            "genres": ["pop", "rock", "hip-hop", "electronic", "r&b"],
+            "mood": "energetic",
+            "activity": "workout"
+        }
+
+        # Send POST request to the /api/analyze-songs endpoint
+        response = self.app.post('/api/analyze-songs',
+                                 data=json.dumps(test_data),
+                                 content_type='application/json')
+
+        # Check if the response status code is 200 (OK)
+        self.assertEqual(response.status_code, 200)
+
+        # Parse the response data
+        response_data = json.loads(response.data)
+
+        # Check if we got 10 tracks
+        self.assertEqual(len(response_data), 10)
+
+        # Check the structure of each track in the response
+        for track in response_data:
+            self.assertIn('track_name', track)
+            self.assertIn('artist_name', track)
+            self.assertIn('spotify_url', track)
+            self.assertIn('mood_score', track)
+            self.assertIn('relevance_score', track)
+            self.assertIn('summary', track)
+            self.assertIn('mood_explanation', track)
+            self.assertIn('relevance_explanation', track)
+
+            # Check if mood_score and relevance_score are integers between 0 and 10
+            self.assertIsInstance(track['mood_score'], int)
+            self.assertIsInstance(track['relevance_score'], int)
+            self.assertTrue(0 <= track['mood_score'] <= 10)
+            self.assertTrue(0 <= track['relevance_score'] <= 10)
+
+            # Check if spotify_url is a valid Spotify track URL
+            self.assertTrue(track['spotify_url'].startswith('https://open.spotify.com/track/'))
+
+            # Check if summary, mood_explanation, and relevance_explanation are non-empty strings
+            self.assertIsInstance(track['summary'], str)
+            self.assertIsInstance(track['mood_explanation'], str)
+            self.assertIsInstance(track['relevance_explanation'], str)
+            self.assertTrue(len(track['summary']) > 0)
+            self.assertTrue(len(track['mood_explanation']) > 0)
+            self.assertTrue(len(track['relevance_explanation']) > 0)
+
+        print("Response data:")
+        print(json.dumps(response_data, indent=2))
 
 if __name__ == '__main__':
     unittest.main()
