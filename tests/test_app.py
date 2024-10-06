@@ -297,11 +297,13 @@ class TestMusicRecommendationAPI(unittest.TestCase):
         # Mock OpenAI API response
         mock_openai.return_value = MagicMock(
             choices=[MagicMock(message={'content': json.dumps({
-                'mood_score': 8,
-                'relevance_score': 7,
+                'mood_relevance_score': 8,
+                'activity_relevance_score': 7,
+                'personal_relevance_score': 6,
                 'summary': 'This is a mock summary.',
                 'mood_explanation': 'This is a mock mood explanation.',
-                'relevance_explanation': 'This is a mock relevance explanation.'
+                'activity_explanation': 'This is a mock activity explanation.',
+                'personal_explanation': 'This is a mock personal explanation.'
             })})]
         )
 
@@ -309,7 +311,8 @@ class TestMusicRecommendationAPI(unittest.TestCase):
         test_data = {
             "genres": ["pop", "rock"],
             "mood": "happy",
-            "activity": "running"
+            "activity": "running",
+            "personal_status": "feeling motivated"
         }
 
         # Send POST request to the /api/analyze-songs endpoint
@@ -327,11 +330,26 @@ class TestMusicRecommendationAPI(unittest.TestCase):
             self.assertIn('track_name', track)
             self.assertIn('artist_name', track)
             self.assertIn('spotify_url', track)
-            self.assertIn('mood_score', track)
-            self.assertIn('relevance_score', track)
+            self.assertIn('mood_relevance_score', track)
+            self.assertIn('activity_relevance_score', track)
+            self.assertIn('personal_relevance_score', track)
             self.assertIn('summary', track)
             self.assertIn('mood_explanation', track)
-            self.assertIn('relevance_explanation', track)
+            self.assertIn('activity_explanation', track)
+            self.assertIn('personal_explanation', track)
+
+            # Check if all scores are integers between 0 and 10
+            for score_field in ['mood_relevance_score', 'activity_relevance_score', 'personal_relevance_score']:
+                self.assertIsInstance(track[score_field], int)
+                self.assertTrue(0 <= track[score_field] <= 10)
+
+            # Check if spotify_url is a valid Spotify track URL
+            self.assertTrue(track['spotify_url'].startswith('https://open.spotify.com/track/'))
+
+            # Check if summary and all explanations are non-empty strings
+            for text_field in ['summary', 'mood_explanation', 'activity_explanation', 'personal_explanation']:
+                self.assertIsInstance(track[text_field], str)
+                self.assertTrue(len(track[text_field]) > 0)
 
     def test_analyze_songs_missing_fields(self):
         # Test with missing fields
@@ -353,7 +371,8 @@ class TestMusicRecommendationAPI(unittest.TestCase):
         test_data = {
             "genres": ["invalid_genre"],
             "mood": "happy",
-            "activity": "running"
+            "activity": "running",
+            "personal_status": "feeling good"
         }
 
         # Send POST request to the /api/analyze-songs endpoint
@@ -364,14 +383,14 @@ class TestMusicRecommendationAPI(unittest.TestCase):
         # Check if the response status code is 500 (Internal Server Error)
         self.assertEqual(response.status_code, 500)
         self.assertIn("Spotify API error", json.loads(response.data)["error"])
-
     @unittest.skip("Only needed when debugging")
     def test_analyze_songs_real(self):
         # Test data
         test_data = {
             "genres": ["pop", "rock", "hip-hop", "electronic", "r&b"],
             "mood": "energetic",
-            "activity": "workout"
+            "activity": "workout",
+            "personal_status": "feeling motivated and ready to push limits"
         }
 
         # Send POST request to the /api/analyze-songs endpoint
@@ -393,28 +412,26 @@ class TestMusicRecommendationAPI(unittest.TestCase):
             self.assertIn('track_name', track)
             self.assertIn('artist_name', track)
             self.assertIn('spotify_url', track)
-            self.assertIn('mood_score', track)
-            self.assertIn('relevance_score', track)
+            self.assertIn('mood_relevance_score', track)
+            self.assertIn('activity_relevance_score', track)
+            self.assertIn('personal_relevance_score', track)
             self.assertIn('summary', track)
             self.assertIn('mood_explanation', track)
-            self.assertIn('relevance_explanation', track)
+            self.assertIn('activity_explanation', track)
+            self.assertIn('personal_explanation', track)
 
-            # Check if mood_score and relevance_score are integers between 0 and 10
-            self.assertIsInstance(track['mood_score'], int)
-            self.assertIsInstance(track['relevance_score'], int)
-            self.assertTrue(0 <= track['mood_score'] <= 10)
-            self.assertTrue(0 <= track['relevance_score'] <= 10)
+            # Check if all scores are integers between 0 and 10
+            for score_field in ['mood_relevance_score', 'activity_relevance_score', 'personal_relevance_score']:
+                self.assertIsInstance(track[score_field], int)
+                self.assertTrue(0 <= track[score_field] <= 10)
 
             # Check if spotify_url is a valid Spotify track URL
             self.assertTrue(track['spotify_url'].startswith('https://open.spotify.com/track/'))
 
-            # Check if summary, mood_explanation, and relevance_explanation are non-empty strings
-            self.assertIsInstance(track['summary'], str)
-            self.assertIsInstance(track['mood_explanation'], str)
-            self.assertIsInstance(track['relevance_explanation'], str)
-            self.assertTrue(len(track['summary']) > 0)
-            self.assertTrue(len(track['mood_explanation']) > 0)
-            self.assertTrue(len(track['relevance_explanation']) > 0)
+            # Check if summary and all explanations are non-empty strings
+            for text_field in ['summary', 'mood_explanation', 'activity_explanation', 'personal_explanation']:
+                self.assertIsInstance(track[text_field], str)
+                self.assertTrue(len(track[text_field]) > 0)
 
         print("Response data:")
         print(json.dumps(response_data, indent=2))

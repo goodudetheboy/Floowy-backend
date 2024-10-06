@@ -192,27 +192,29 @@ def get_song_lyrics(track_name, artist_name):
     # This is a placeholder function. In a real-world scenario, you would use a lyrics API or web scraping to get the lyrics.
     # For this example, we'll return a dummy lyrics string.
     return f"This is a placeholder for the lyrics of {track_name} by {artist_name}."
-
-def analyze_lyrics(lyrics, mood, activity):
+def analyze_lyrics(lyrics, mood, activity, personal_status):
     prompt = f"""
-    Analyze the following song lyrics in the context of the given mood and activity:
+    Analyze the following song lyrics in the context of the given mood, activity, and personal status:
 
     Lyrics: {lyrics}
 
     Mood: {mood}
     Activity: {activity}
+    Personal Status: {personal_status}
 
     Please provide your analysis in JSON format with the following structure:
     {{
-        "mood_score": <int between 0 and 10>,
-        "relevance_score": <int between 0 and 10>,
+        "mood_relevance_score": <int between 0 and 10>,
+        "activity_relevance_score": <int between 0 and 10>,
+        "personal_relevance_score": <int between 0 and 10>,
         "summary": "<brief summary of the lyrics, max 50 words>",
-        "mood_explanation": "<brief explanation of the mood score>",
-        "relevance_explanation": "<brief explanation of the relevance score>"
+        "mood_explanation": "<brief explanation of the mood relevance score>",
+        "activity_explanation": "<brief explanation of the activity relevance score>",
+        "personal_explanation": "<brief explanation of the personal relevance score>"
     }}
     """
 
-    response = client.chat.completions.create(
+    response = openai.ChatCompletion.create(
         model="gpt-3.5-turbo",
         messages=[
             {"role": "system", "content": "You are a helpful assistant that analyzes song lyrics and provides responses in JSON format."},
@@ -221,15 +223,17 @@ def analyze_lyrics(lyrics, mood, activity):
     )
 
     try:
-        analysis = json.loads(response.choices[0].message.content)
+        analysis = json.loads(response.choices[0].message['content'])
         return analysis
     except json.JSONDecodeError:
         return {
-            "mood_score": 0,
-            "relevance_score": 0,
+            "mood_relevance_score": 0,
+            "activity_relevance_score": 0,
+            "personal_relevance_score": 0,
             "summary": "Error parsing ChatGPT response",
             "mood_explanation": "Error parsing ChatGPT response",
-            "relevance_explanation": "Error parsing ChatGPT response"
+            "activity_explanation": "Error parsing ChatGPT response",
+            "personal_explanation": "Error parsing ChatGPT response"
         }
 
 @app.route('/api/analyze-songs', methods=['POST'])
@@ -238,13 +242,14 @@ def analyze_songs():
         data = request.json
         
         # Validate input
-        required_fields = ['genres', 'mood', 'activity']
+        required_fields = ['genres', 'mood', 'activity', 'personal_status']
         if not all(field in data for field in required_fields):
             return jsonify({"error": "Invalid input: missing required fields"}), 400
 
         genres = data['genres'][:5]  # Limit to top 5 genres
         mood = data['mood']
         activity = data['activity']
+        personal_status = data['personal_status']
 
         # Get tracks for each genre
         all_tracks = []
@@ -270,17 +275,19 @@ def analyze_songs():
             track_name = track['name']
             artist_name = track['artists'][0]['name']
             lyrics = get_song_lyrics(track_name, artist_name)
-            analysis = analyze_lyrics(lyrics, mood, activity)
+            analysis = analyze_lyrics(lyrics, mood, activity, personal_status)
 
             analyzed_tracks.append({
                 "track_name": track_name,
                 "artist_name": artist_name,
                 "spotify_url": track['external_urls']['spotify'],
-                "mood_score": analysis['mood_score'],
-                "relevance_score": analysis['relevance_score'],
+                "mood_relevance_score": analysis['mood_relevance_score'],
+                "activity_relevance_score": analysis['activity_relevance_score'],
+                "personal_relevance_score": analysis['personal_relevance_score'],
                 "summary": analysis['summary'],
                 "mood_explanation": analysis['mood_explanation'],
-                "relevance_explanation": analysis['relevance_explanation']
+                "activity_explanation": analysis['activity_explanation'],
+                "personal_explanation": analysis['personal_explanation']
             })
 
         return jsonify(analyzed_tracks)
