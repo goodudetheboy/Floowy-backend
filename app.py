@@ -1,6 +1,14 @@
 from flask import Flask, request, jsonify
+import requests
 
 app = Flask(__name__)
+
+base_url = 'https://suno-api-1-ruby.vercel.app'
+
+def custom_generate_audio(payload):
+    url = f"{base_url}/api/custom_generate"
+    response = requests.post(url, json=payload, headers={'Content-Type': 'application/json'})
+    return response.json()
 
 @app.route('/api/recommend', methods=['POST'])
 def recommend_songs():
@@ -45,6 +53,54 @@ def recommend_songs():
         return jsonify({"error": f"Invalid input: missing key {str(e)}"}), 400
     except TypeError:
         return jsonify({"error": "Invalid input: expected a list of dictionaries"}), 400
+    except Exception as e:
+        return jsonify({"error": f"An unexpected error occurred: {str(e)}"}), 500
+
+@app.route('/api/generate-song', methods=['POST'])
+def generate_song():
+    try:
+        data = request.json
+        
+        # Validate input
+        required_fields = ['mood', 'activity', 'personal_details']
+        if not all(field in data for field in required_fields):
+            return jsonify({"error": "Invalid input: missing required fields"}), 400
+
+        # Extract data
+        mood = data['mood']
+        activity = data['activity']
+        personal_details = data['personal_details']
+
+        # Compile prompt
+        prompt = f"A song that captures the mood of {mood}, while doing {activity}. {personal_details}"
+
+        # Generate song
+        payload = {
+            "prompt": prompt,
+            "make_instrumental": False,
+            "wait_audio": False
+        }
+        
+        response = custom_generate_audio(payload)
+
+        # Extract relevant information
+        if response and len(response) > 0:
+            song_data_0 = response[0].get('0', {})
+            song_data_1 = response[0].get('1', {})
+            
+            return jsonify({
+                "id_0": song_data_0.get('id', ''),
+                "audio_url_0": song_data_0.get('audio_url', ''),
+                "id_1": song_data_1.get('id', ''),
+                "audio_url_1": song_data_1.get('audio_url', '')
+            })
+        else:
+            return jsonify({"error": "Failed to generate song"}), 500
+
+    except KeyError as e:
+        return jsonify({"error": f"Invalid input: missing key {str(e)}"}), 400
+    except requests.RequestException as e:
+        return jsonify({"error": f"API request failed: {str(e)}"}), 500
     except Exception as e:
         return jsonify({"error": f"An unexpected error occurred: {str(e)}"}), 500
 
